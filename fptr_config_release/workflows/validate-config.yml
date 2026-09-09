@@ -1,0 +1,46 @@
+# Optional companion to publish-config.yml.
+#
+# Catches the things that only bite at bootstrap time - a dev descriptor left
+# in env/, a hard-coded storage path in core/roots.yml, a committed api_key -
+# while the change is still a pull request, instead of after it has been
+# released to artists.
+#
+# Needs no secrets and never touches the PTR site: --zip-only builds and
+# validates the artifact and stops there.
+#
+# Copy to .github/workflows/validate-config.yml. Delete it if you do not want
+# PR gating.
+
+name: Validate config
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PyYAML
+        run: pip install --disable-pip-version-check PyYAML
+
+      - name: Build and validate the config zip
+        # Drop --strict if you want warnings to be advisory rather than blocking.
+        run: |
+          python tools/fptr_config_release/publish_config.py \
+            --zip-only --strict \
+            --strip-installed-state \
+            --version "pr-${{ github.event.pull_request.number || github.sha }}" \
+            --output dist/config-check.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: config-preview
+          path: dist/config-check.zip

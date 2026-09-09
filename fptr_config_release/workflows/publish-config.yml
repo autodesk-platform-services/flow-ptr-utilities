@@ -1,0 +1,133 @@
+# Publish the pipeline configuration to Flow Production Tracking on release.
+#
+# Copy this file to .github/workflows/publish-config.yml in your config repo,
+# and copy the publish_config.py + requirements.txt next to it (this workflow
+# expects them under tools/fptr_config_release/).
+#
+# Repository settings required (Settings > Secrets and variables > Actions):
+#
+#   Secrets    FPTR_SCRIPT_NAME   name of the API Script user
+#              FPTR_API_KEY       its application key
+#   Variables  FPTR_SITE          https://yourstudio.shotgrid.autodesk.com
+#              FPTR_PROJECT_ID    project id, or leave unset for a site-wide config
+#              FPTR_CONFIG_NAME   Pipeline Configuration name (default: Primary)
+#              FPTR_STAGING_CONFIG_NAME  target for pre-releases (default: Staging)
+#
+# The API Script user only needs read/write on PipelineConfiguration.
+
+name: Publish config to Flow Production Tracking
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v2.1.0)"
+        required: true
+      config_name:
+        description: "Override the target Pipeline Configuration name"
+        required: false
+      dry_run:
+        description: "Report what would happen, change nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  # Never let two releases race each other onto the same config.
+  group: fptr-publish-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # needed to attach the built zip to the release
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    # Uncomment to require a manual approval before anything reaches the site.
+    # Create the environment first under Settings > Environments.
+    # environment: flow-production-tracking
+
+    steps:
+      - name: Work out which tag we are publishing
+        id: target
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "release" ]; then
+            tag="${{ github.event.release.tag_name }}"
+            prerelease="${{ github.event.release.prerelease }}"
+          else
+            tag="${{ inputs.tag }}"
+            prerelease="false"
+          fi
+
+          # Pre-releases go to the staging config so artists are never exposed
+          # to an untested config; full releases go to the real one.
+          override="${{ inputs.config_name }}"
+          if [ -n "$override" ]; then
+            name="$override"
+          elif [ "$prerelease" = "true" ]; then
+            name="${{ vars.FPTR_STAGING_CONFIG_NAME || 'Staging' }}"
+          else
+            name="${{ vars.FPTR_CONFIG_NAME || 'Primary' }}"
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "config_name=$name" >> "$GITHUB_OUTPUT"
+          echo "Publishing config '$name' from tag '$tag' (prerelease=$prerelease)"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.tag }}
+          fetch-depth: 0 # publish_config.py records the commit sha in the zip
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --disable-pip-version-check -r tools/fptr_config_release/requirements.txt
+
+      - name: Build, validate and publish the config
+        id: publish
+        env:
+          SG_SITE: ${{ vars.FPTR_SITE }}
+          SG_SCRIPT_NAME: ${{ secrets.FPTR_SCRIPT_NAME }}
+          SG_API_KEY: ${{ secrets.FPTR_API_KEY }}
+        run: |
+          set -euo pipefail
+          args=(
+            --ref "${{ steps.target.outputs.tag }}"
+            --version "${{ steps.target.outputs.tag }}"
+            --config-name "${{ steps.target.outputs.config_name }}"
+            --output "dist/${{ steps.target.outputs.config_name }}-${{ steps.target.outputs.tag }}.zip"
+            --strip-installed-state
+            --set-plugin-ids
+            --clear-descriptor
+          )
+          if [ -n "${{ vars.FPTR_PROJECT_ID }}" ]; then
+            args+=(--project-id "${{ vars.FPTR_PROJECT_ID }}")
+          else
+            args+=(--site-wide)
+          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          python tools/fptr_config_release/publish_config.py "${args[@]}"
+
+      - name: Attach the built zip to the release
+        # Gives offline studios a ready-to-upload artifact with the exact
+        # layout Toolkit expects - unlike GitHub's auto-generated source zip.
+        if: github.event_name == 'release' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ steps.target.outputs.tag }}" dist/*.zip --clobber
+
+      - name: Keep the artifact even when the release step is skipped
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: config-${{ steps.target.outputs.tag }}
+          path: dist/*.zip
+          if-no-files-found: warn
