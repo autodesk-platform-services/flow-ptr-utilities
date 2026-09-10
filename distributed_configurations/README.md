@@ -1,8 +1,5 @@
 # Automated config releases for Flow Production Tracking
 
-Automates the distributed-config workflow from
-[Phil's community post](https://community.shotgridsoftware.com/t/distributed-config-management-workflow/232):
-
 | Phil's manual step | Here |
 | --- | --- |
 | Develop locally | unchanged |
@@ -135,10 +132,6 @@ advisory unless you pass `--strict`.
 The last two are cleaned up automatically by `--strip-installed-state`, which
 the CI workflow passes.
 
-> Heads up: the config at `fptr_configs/config` in this workspace trips three of
-> these — it's an installed config (real `pc_id` 925, a `windows_path` baked into
-> `roots.yml`, a local `install_location.yml`). Publish from the *source* repo,
-> not from an installed config folder.
 
 ## Offline / no-internet studios
 
@@ -189,7 +182,7 @@ The attachment id changes on every upload, which is exactly how clients detect
 a new config, so a rollback is just a re-publish of the older tag:
 
 ```bash
-python publish_config.py --ref v2.0.0 --version v2.0.0 --project-id 881
+python publish_config.py --ref v2.0.0 --version v2.0.0 --project-id 1
 ```
 
 Or re-run the release workflow manually with `tag: v2.0.0`. Because the workflow
