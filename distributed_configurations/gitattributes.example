@@ -1,0 +1,20 @@
+# Copy the relevant lines into the .gitattributes at the root of your config
+# repo. `git archive` (which publish_config.py uses to export a tag) honours
+# export-ignore, so anything listed here never reaches the uploaded zip.
+#
+# publish_config.py also prunes these itself, so this file is belt-and-braces -
+# but it additionally keeps GitHub's own auto-generated release zipballs clean,
+# which matters if anyone ever uploads one of those by hand.
+
+.github/            export-ignore
+.gitattributes      export-ignore
+.gitignore          export-ignore
+tests/              export-ignore
+docs/               export-ignore
+*.md                export-ignore
+.pre-commit-config.yaml export-ignore
+
+# Keep YAML and hook line endings stable across Windows/macOS/Linux artists.
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.py    text eol=lf
